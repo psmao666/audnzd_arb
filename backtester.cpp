@@ -4,6 +4,9 @@
 #include "orderbook.h"
 #include <vector>
 
+#define ADD_GAP 0.0005
+#define MULTIPLY 1.3
+
 double getPrice(std::ifstream& reader, bool printTime);
 void onTick(double audPrice, double nzdPrice, OrderBook& orders);
 
@@ -29,7 +32,9 @@ int main() {
         if (audPrice == -1) break;
         reporter << "Time: " << time << std::endl;
         onTick(audPrice, nzdPrice, orders);
-        double pnl = orders.calculatePnL(audPrice - nzdPrice, reporter, true);
+        auto h = orders.calculatePnL(audPrice - nzdPrice, reporter, true);
+        double pnl = h.first;
+        double lots = h.second;
 
         if (abs(pnl) > orders.balance * 0.8) {
             reporter << "Margin Call!\n";
@@ -37,7 +42,7 @@ int main() {
         }
         
         if (pnl < 0) maxDrawdown = std::min(maxDrawdown, pnl / orders.balance * 100);
-        orders.checkForClose(pnl);
+        orders.checkForClose(pnl, lots);
     }
     reporter << "Max drawdown is " << maxDrawdown << "%\n";
     reporter << "Total Lot is " << total_lots << std::endl;
@@ -71,12 +76,12 @@ void onTick(double audPrice, double nzdPrice, OrderBook& orders) {
     if (orders.hasOrder()) {
         const Order& lastOrder = orders.getLastOrder();
         if (lastOrder.dir == Action::LONG && 
-            lastOrder.entryPrice - 0.001 >= priceGap) {
-                orders.sendOrder(Action::LONG, priceGap, lastOrder.volume * 1.3, total_lots);
+            lastOrder.entryPrice - ADD_GAP >= priceGap) {
+                orders.sendOrder(Action::LONG, priceGap, lastOrder.volume * MULTIPLY, total_lots);
             }
         else if (lastOrder.dir == Action::SHORT && 
-            lastOrder.entryPrice + 0.001 <= priceGap) {
-                orders.sendOrder(Action::SHORT, priceGap, lastOrder.volume * 1.3, total_lots);
+            lastOrder.entryPrice + ADD_GAP <= priceGap) {
+                orders.sendOrder(Action::SHORT, priceGap, lastOrder.volume * MULTIPLY, total_lots);
             }
         return;
     }
@@ -84,11 +89,10 @@ void onTick(double audPrice, double nzdPrice, OrderBook& orders) {
     double MA = n_gap.getMA();
     
     
-    if (priceGap < MA - 0.001) {
-        orders.sendOrder(Action::LONG, priceGap, orders.balance / 500000, total_lots);
-    } else if (priceGap > MA + 0.01) {
-        orders.sendOrder(Action::SHORT, priceGap, orders.balance / 500000, total_lots);
+    if (priceGap < MA - 0.0005) {
+        orders.sendOrder(Action::LONG, priceGap, 0.1, total_lots);
+    } else if (priceGap > MA + 0.0005) {
+        orders.sendOrder(Action::SHORT, priceGap, 0.1, total_lots);
     }
-    orders.checkForClose(priceGap);
     return;
 }

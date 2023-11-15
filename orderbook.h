@@ -4,7 +4,7 @@
 #include <vector>
 #include <deque>
 
-#define N_MOVING_AVERAGE 26
+#define N_MOVING_AVERAGE 200
 #define TP_RATIO 0.02
 
 enum Action {
@@ -27,8 +27,8 @@ public:
     void sendOrder(Action act, double price, double volume, double& total_lots);
     Order getLastOrder();
     bool hasOrder();
-    void checkForClose(double pnl);
-    double calculatePnL(double realtimeGap, std::ofstream& outputer, bool ifPrintOrders);
+    void checkForClose(double pnl, double lots);
+    std::pair<double, double> calculatePnL(double realtimeGap, std::ofstream& outputer, bool ifPrintOrders);
 private:
     std::vector<Order> book;
 };
@@ -67,8 +67,8 @@ bool OrderBook::hasOrder() {
     return book.size() != 0;
 }
 
-void OrderBook::checkForClose(double pnl) {
-    if (pnl >= this->balance * 0.02) {
+void OrderBook::checkForClose(double pnl, double lots) {
+    if (pnl >= 1) {
         this->balance += pnl;
         this->book.clear();
     }
@@ -79,7 +79,7 @@ Order OrderBook::getLastOrder() {
     return book[n - 1];
 }
 
-double OrderBook::calculatePnL(double realtimeGap, std::ofstream& outputer, bool ifPrintOrders = false) {
+std::pair<double, double> OrderBook::calculatePnL(double realtimeGap, std::ofstream& outputer, bool ifPrintOrders = false) {
     double pnl = 0;
     if (ifPrintOrders) {
         outputer << "Current Gap is " << realtimeGap << std::endl;
@@ -104,5 +104,5 @@ double OrderBook::calculatePnL(double realtimeGap, std::ofstream& outputer, bool
         outputer << "Current Equity: " << this->balance + pnl << std::endl;
         outputer << "#############################################################\n";
     }
-    return pnl;
+    return std::make_pair(pnl, total_lots);
 }
