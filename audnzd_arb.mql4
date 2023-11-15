@@ -1,0 +1,210 @@
+//+------------------------------------------------------------------+
+//|                                                   audnzd_Arb.mq4 |
+//|                                                            psmao |
+//|                          https://github.com/psmao666/audnzd_arb/ |
+//+------------------------------------------------------------------+
+#property copyright "psmao"
+#property link      "https://github.com/psmao666/audnzd_arb/"
+#property version   "1.00"
+#property strict
+
+//--- input parameters
+input double   Initial_Lot    = 0.02;
+input double   ADD_GAP        = 0.001;
+input string   INSTRUMENT_A   = "AUDUSD.p";
+input string   INSTRUMENT_B   = "NZDUSD.p";
+input int      MA_PARAMETER   = 200;
+input string   COMMENT        = "www.letwincapital.com AUDNZD pair trade mean reversion";
+input double   OneLot_TP      = 200;
+
+enum Action{LONG, SHORT, NOTHING};
+class Deque{
+public:
+   Deque();
+   void push_back(double price);
+   void pop_front();
+   double front();
+   int size();
+private:
+   double arr[];
+   int fr, sz;
+};
+class buffer{
+public:
+   buffer() {sum = 0;}
+   void insert(double price);
+   double getMA();
+private:
+   Deque buff;
+   double sum;
+}logs;
+Action TradeMode;
+double lastGap;
+double totalLots;
+// Define the chart coordinates for displaying information
+int xCoord = 10;
+int yCoord = 50;
+// Define the font size
+int fontSize = 40;
+
+
+Deque::Deque() {
+   ArrayResize(arr, MA_PARAMETER);
+   fr = 0; sz = 0;
+}
+int Deque::size() {
+   return sz;
+}
+void Deque::push_back(double price) {
+   arr[(fr + sz) % MA_PARAMETER] = price;
+   ++ sz;  
+}
+void Deque::pop_front() {
+   ++ fr; -- sz;
+}
+double Deque::front() {
+   return arr[fr];
+}
+void buffer::insert(double price) {
+   buff.push_back(price);
+   sum += price;
+   while (buff.size() > MA_PARAMETER) {
+      sum -= buff.front();
+      buff.pop_front();
+   }
+}
+double buffer::getMA() {
+   if (buff.size() == 0) return 0;
+   else return sum / buff.size();
+}
+
+void sendOrder(Action dir, double audPrice, double nzdPrice, double volume) {
+   volume = (int)(volume * 100) / 100.0;
+   totalLots += volume * 2;
+   if (dir == Action::LONG) {
+      // long the gap
+      // = Long AUD, Short NZD
+      if (OrderSend(INSTRUMENT_A, OP_BUY, volume, audPrice, 5, 0, 0, COMMENT) >= 0 &&
+          OrderSend(INSTRUMENT_B, OP_SELL, volume, nzdPrice, 5, 0, 0, COMMENT) >= 0) {
+      } else {
+         printf("Failed to send order!");
+      }
+   } else {
+   // short the gap
+   // = short aud, long nzd
+      if (OrderSend(INSTRUMENT_A, OP_SELL, volume, audPrice, 5, 0, 0, COMMENT) >= 0 &&
+          OrderSend(INSTRUMENT_B, OP_BUY, volume, nzdPrice, 5, 0, 0, COMMENT) >= 0) {
+      } else {
+         printf("Failed to send order!");
+      }
+   }
+}
+void closeAllOrders(double audPrice, double nzdPrice) {
+   totalLots = 0;
+   lastGap = 0;
+   TradeMode = Action::NOTHING;
+   
+   for (int i = OrdersTotal() - 1; i >= 0; -- i) {
+      OrderSelect(i, SELECT_BY_POS, MODE_TRADES);
+      if (OrderSymbol() == INSTRUMENT_A) {
+         OrderClose(OrderTicket(), OrderLots(), audPrice, 5);
+      } else {
+         OrderClose(OrderTicket(), OrderLots(), nzdPrice, 5);
+      }
+   }
+}
+void DrawLabels()
+  {
+   // Draw labels on the chart
+   ObjectCreate(0, "Label_AUD", OBJ_LABEL, 0, 0, 0);
+   ObjectSetString(0, "Label_AUD", OBJPROP_TEXT, "AUD:");
+   ObjectSetInteger(0, "Label_AUD", OBJPROP_XDISTANCE, xCoord);
+   ObjectSetInteger(0, "Label_AUD", OBJPROP_YDISTANCE, yCoord);
+
+   ObjectCreate(0, "Label_NZD", OBJ_LABEL, 0, 0, 0);
+   ObjectSetString(0, "Label_NZD", OBJPROP_TEXT, "NZD:");
+   ObjectSetInteger(0, "Label_NZD", OBJPROP_XDISTANCE, xCoord);
+   ObjectSetInteger(0, "Label_NZD", OBJPROP_YDISTANCE, yCoord + fontSize);
+
+   ObjectCreate(0, "Label_Gap", OBJ_LABEL, 0, 0, 0);
+   ObjectSetString(0, "Label_Gap", OBJPROP_TEXT, "Gap:");
+   ObjectSetInteger(0, "Label_Gap", OBJPROP_XDISTANCE, xCoord);
+   ObjectSetInteger(0, "Label_Gap", OBJPROP_YDISTANCE, yCoord + 2 * fontSize);
+   
+   ObjectCreate(0, "Label_Average Gap", OBJ_LABEL, 0, 0, 0);
+   ObjectSetString(0, "Label_Average Gap", OBJPROP_TEXT, "Average Gap:");
+   ObjectSetInteger(0, "Label_Average Gap", OBJPROP_XDISTANCE, xCoord);
+   ObjectSetInteger(0, "Label_Average Gap", OBJPROP_YDISTANCE, yCoord + 3 * fontSize);
+  }
+//+------------------------------------------------------------------+
+//| Function to display information on the chart                    |
+//+------------------------------------------------------------------+
+void DisplayInfo(string label, double value, int x, int y)
+  {
+   // Convert the value to string
+   string text = StringFormat("%s %.5f", label, value);
+   
+   // Display the information on the chart
+   ObjectCreate(0, label, OBJ_LABEL, 0, 0, 0);
+   ObjectSetString(0, label, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, label, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, label, OBJPROP_YDISTANCE, y);
+  }
+  
+void OnInit() {
+   TradeMode = Action::NOTHING;
+   lastGap = 0;
+   totalLots = 0;
+   // Set the chart properties
+   ChartSetInteger(0, CHART_AUTOSCROLL, false);
+   // Draw labels on the chart
+   DrawLabels();
+}
+
+void OnTick()
+  {
+//---
+   double audPrice = MarketInfo(INSTRUMENT_A, MODE_ASK);
+   double nzdPrice = MarketInfo(INSTRUMENT_B, MODE_ASK);
+   double priceGap = audPrice - nzdPrice;
+   logs.insert(priceGap);
+   
+   DisplayInfo(INSTRUMENT_A, audPrice, xCoord, yCoord);
+   DisplayInfo(INSTRUMENT_B, nzdPrice, xCoord, yCoord + fontSize);
+   DisplayInfo("Gap", priceGap, xCoord, yCoord + 2 * fontSize);
+   DisplayInfo("Average Gap", logs.getMA(), xCoord, yCoord + 3 * fontSize);
+   
+   if (TradeMode == Action::NOTHING) {
+      //no order, we can check MA
+      double MA = logs.getMA();
+      if (priceGap < MA - 0.001) {
+        sendOrder(Action::LONG, audPrice, nzdPrice, Initial_Lot);
+        TradeMode = Action::LONG;
+        lastGap = audPrice - nzdPrice;
+      } else if (priceGap > MA + 0.001) {
+        sendOrder(Action::SHORT, audPrice, nzdPrice, Initial_Lot);
+        TradeMode = Action::SHORT;
+        lastGap = audPrice - nzdPrice;
+      }
+   } else {
+      // has orders, check add orders
+      int lastOrderID = OrdersTotal() - 1;
+      OrderSelect(lastOrderID, SELECT_BY_POS, MODE_TRADES);
+      
+      if (TradeMode == Action::LONG && 
+         lastGap - 0.001 >= priceGap) {
+         sendOrder(Action::LONG, audPrice, nzdPrice, OrderLots() * 1.3);
+         lastGap = audPrice - nzdPrice; 
+       }
+       else if (TradeMode == Action::SHORT && 
+         lastGap + 0.001 <= priceGap) {
+         sendOrder(Action::SHORT, audPrice, nzdPrice, OrderLots() * 1.3);
+         lastGap = audPrice - nzdPrice; 
+       }
+      }
+   // now let's check for close
+   if (AccountProfit() >= totalLots * OneLot_TP) {
+      closeAllOrders(audPrice, nzdPrice);
+   }
+  }
+//+------------------------------------------------------------------+
